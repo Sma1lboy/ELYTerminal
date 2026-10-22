@@ -98,6 +98,9 @@ impl TerminalView {
         } else {
             Action::Press
         };
+        if action == Action::Press && interrupts(&event.keystroke) {
+            self.records.interrupt();
+        }
         let id = held(&event.keystroke, facts);
         let prior = self.held.get(&id).copied();
         let went = self.send(&event.keystroke, action, facts, prior, cx);
@@ -417,6 +420,17 @@ impl EntityInputHandler for TerminalView {
         _: &mut Context<Self>,
     ) -> Option<usize> {
         None
+    }
+}
+
+/// Esc alone or Ctrl-C alone: what breaks off a program's work.
+fn interrupts(keystroke: &Keystroke) -> bool {
+    let m = keystroke.modifiers;
+    let others = m.alt || m.platform || m.function;
+    match keystroke.key.as_str() {
+        "escape" => !others && !m.control && !m.shift,
+        "c" => !others && m.control && !m.shift,
+        _ => false,
     }
 }
 

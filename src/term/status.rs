@@ -200,6 +200,8 @@ pub struct Records {
     reported: bool,
     /// The state a row showed at the last note.
     shows: Option<State>,
+    /// Esc or Ctrl-C was pressed during OSC 9;4's work, so its end is no finish.
+    interrupted: bool,
 }
 
 impl Records {
@@ -223,7 +225,12 @@ impl Records {
             title: None,
             msg: None,
         };
+        let working = self.mapped_work();
         match progress {
+            // Work that ends is done, as Claude Code's turns end, unless the user broke it off.
+            Progress::Remove if working && !self.interrupted => {
+                self.put(String::new(), root(State::Done, None))
+            }
             Progress::Remove => self.list.retain(|(id, ..)| !id.is_empty()),
             // Paused work is work still, its progress kept.
             Progress::Set(value) | Progress::Pause(value) => {
@@ -232,6 +239,26 @@ impl Records {
             Progress::Indeterminate => self.put(String::new(), root(State::Working, None)),
             Progress::Error(_) => self.put(String::new(), root(State::Error, None)),
         }
+        if !working || matches!(progress, Progress::Remove | Progress::Error(_)) {
+            self.interrupted = false;
+        }
+    }
+
+    /// Esc or Ctrl-C reached the program: the work OSC 9;4 shows ends broken off, not done.
+    pub fn interrupt(&mut self) {
+        if self.mapped_work() && !self.interrupted {
+            log::info!("status: Esc or Ctrl-C breaks off OSC 9;4's work");
+            self.interrupted = true;
+        }
+    }
+
+    /// The root record is work OSC 9;4 maps.
+    fn mapped_work(&self) -> bool {
+        !self.reported
+            && self
+                .list
+                .iter()
+                .any(|(id, record, _)| id.is_empty() && record.state == State::Working)
     }
 
     /// herdr's agents in place of the last ones; true when they differ.

@@ -47,6 +47,14 @@ pub fn record(keystroke: &Keystroke, action: Action) -> Option<Vec<u8>> {
     Some(format!("\x1b[{key};{scan};{unit};{down};{control};1_").into_bytes())
 }
 
+/// `text` as records, each UTF-16 unit a press and a release: ConPTY drops an OSC reply that goes as bytes.
+pub fn typed(text: &str) -> Vec<u8> {
+    text.encode_utf16()
+        .flat_map(|unit| [1, 0].map(|down| format!("\x1b[0;0;{unit};{down};0;1_")))
+        .collect::<String>()
+        .into_bytes()
+}
+
 /// The key's own character, where gpui named `made`, what Shift made of it, and dropped Shift.
 pub fn unshifted(made: &str) -> Option<char> {
     let mut chars = made.chars();
@@ -146,6 +154,15 @@ mod tests {
         assert_eq!(virtual_key("f12"), Some((VK_F1 + 11, false)));
         assert_eq!(virtual_key("f25"), None);
         assert_eq!(virtual_key("a"), Some((u16::from(b'A'), false)));
+    }
+
+    #[test]
+    fn typed_text_goes_as_a_press_and_a_release_a_unit() {
+        let records = String::from_utf8(typed("\x1b]é")).expect("text");
+        assert_eq!(
+            records,
+            "\x1b[0;0;27;1;0;1_\x1b[0;0;27;0;0;1_\x1b[0;0;93;1;0;1_\x1b[0;0;93;0;0;1_\x1b[0;0;233;1;0;1_\x1b[0;0;233;0;0;1_"
+        );
     }
 
     #[test]

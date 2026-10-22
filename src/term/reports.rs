@@ -106,19 +106,29 @@ impl TerminalView {
         match status {
             Status::Report(id, record) => self.records.report(id, record),
             Status::Clear(id) => self.records.clear(id.as_deref()),
-            Status::Query => self.pty.write(status::REPLY.as_bytes().to_vec()),
+            Status::Query => self.reply(status::REPLY.to_string()),
         }
+    }
+
+    /// An answer to a program; under win32-input-mode ConPTY drops it as bytes, so it goes typed.
+    fn reply(&self, answer: String) {
+        #[cfg(windows)]
+        if self.win32 {
+            log::debug!("pty {}: answers as records, win32-input-mode", self.pty.pid);
+            return self.pty.write(super::win32::typed(&answer));
+        }
+        self.pty.write(answer.into_bytes());
     }
 
     /// Maps progress, answers the query and alive in order, and posts and closes notifications.
     pub(super) fn ask(&mut self, ask: Ask, cx: &mut Context<Self>) {
         match ask {
             Ask::Progress(progress) => self.records.progress(progress),
-            Ask::Query(id) => self.pty.write(notify::answer(&id).into_bytes()),
+            Ask::Query(id) => self.reply(notify::answer(&id)),
             Ask::Alive(id) => {
                 let alive = self.notices.alive();
                 log::debug!("pty {}: notifications alive: {alive:?}", self.pty.pid);
-                self.pty.write(notify::alive(&id, &alive).into_bytes());
+                self.reply(notify::alive(&id, &alive));
             }
             Ask::Show(notice) => self.post(said(&notice), Some(&notice), cx),
             Ask::Close(id) => self.close(&id, cx),

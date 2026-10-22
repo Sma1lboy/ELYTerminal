@@ -393,3 +393,45 @@ fn each_change_of_the_state_a_row_shows_is_noted() {
     assert!(records.restate());
     assert_eq!(records.shows(), None);
 }
+
+#[test]
+fn osc_9_4_work_that_ends_is_done_unless_broken_off() {
+    let root = |records: &Records| {
+        records
+            .list
+            .iter()
+            .find(|(id, ..)| id.is_empty())
+            .map(|(_, record, _)| record.state)
+    };
+    let mut records = Records::default();
+    records.progress(Progress::Indeterminate);
+    records.progress(Progress::Remove);
+    assert_eq!(root(&records), Some(State::Done), "work that ends is done");
+    assert!(records.seen(), "typing sees it");
+    records.progress(Progress::Indeterminate);
+    records.interrupt();
+    records.progress(Progress::Remove);
+    assert_eq!(root(&records), None, "Esc or Ctrl-C broke it off");
+    records.progress(Progress::Set(Some(10)));
+    records.progress(Progress::Remove);
+    assert_eq!(
+        root(&records),
+        Some(State::Done),
+        "the next work starts clean"
+    );
+    records.interrupt();
+    records.progress(Progress::Indeterminate);
+    records.progress(Progress::Remove);
+    assert_eq!(
+        root(&records),
+        Some(State::Done),
+        "a press while nothing works breaks nothing off"
+    );
+    records.report("a".into(), record(State::Idle, None));
+    records.progress(Progress::Remove);
+    assert_eq!(
+        root(&records),
+        Some(State::Done),
+        "OSC 7501 leads, 9;4 passes by"
+    );
+}
