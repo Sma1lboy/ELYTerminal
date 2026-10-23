@@ -111,18 +111,7 @@ pub fn spawn(
 ) -> anyhow::Result<(Pty, Events)> {
     // Windows reads the registry afresh, so a folder added since this process opened still reaches a session.
     #[cfg(windows)]
-    let env = {
-        let mut env = super::env::fresh()?;
-        env.set("TERM", "xterm-256color".into());
-        env.set("COLORTERM", "truecolor".into());
-        if env.get("LANG").is_none() {
-            env.set("LANG", "en_US.UTF-8".into());
-        }
-        for (name, value) in &launch.env {
-            env.set(name, value.clone());
-        }
-        env.into_map()
-    };
+    let env = session_env(super::env::fresh()?, launch);
     #[cfg(not(windows))]
     let env = {
         let mut env = HashMap::from([
@@ -283,8 +272,69 @@ pub fn fit(columns: usize, lines: usize, cell: (u16, u16)) -> WindowSize {
     }
 }
 
+/// A Windows session's variables: the registry's, the terminal's names, then the launch's own.
+#[cfg(windows)]
+fn session_env(mut env: super::env::Env, launch: &Launch) -> HashMap<String, String> {
+    env.set("TERM", "xterm-256color".into());
+    env.set("COLORTERM", "truecolor".into());
+    // Claude Code sends OSC 9;4 only to terminals it knows; see AGENTS.md, 2026-10-22, Ghostty's name.
+    env.set("TERM_PROGRAM", "ghostty".into());
+    env.set("TERM_PROGRAM_VERSION", "1.2.0".into());
+    if env.get("LANG").is_none() {
+        env.set("LANG", "en_US.UTF-8".into());
+    }
+    for (name, value) in &launch.env {
+        env.set(name, value.clone());
+    }
+    env.into_map()
+}
+
 #[cfg(all(test, unix))]
 mod tests;
+
+#[cfg(all(test, windows))]
+mod windows_env {
+    use super::*;
+    use crate::term::drop::Quote;
+
+    #[test]
+    fn a_windows_session_names_its_terminal_ghostty_and_keeps_the_launch_s_own() {
+        let launch = Launch {
+            program: None,
+            cwd: std::env::temp_dir(),
+            env: vec![
+                ("TERM_PROGRAM".into(), "mine".into()),
+                ("ELY".into(), "ok".into()),
+            ],
+            reports: false,
+            quote: Quote::PowerShell,
+        };
+        let plain = Launch {
+            env: Vec::new(),
+            ..launch.clone()
+        };
+        let env = session_env(
+            super::super::env::fresh().expect("the registry reads"),
+            &plain,
+        );
+        assert_eq!(env.get("TERM_PROGRAM").map(String::as_str), Some("ghostty"));
+        assert_eq!(
+            env.get("TERM_PROGRAM_VERSION").map(String::as_str),
+            Some("1.2.0")
+        );
+        assert_eq!(env.get("TERM").map(String::as_str), Some("xterm-256color"));
+        let env = session_env(
+            super::super::env::fresh().expect("the registry reads"),
+            &launch,
+        );
+        assert_eq!(
+            env.get("TERM_PROGRAM").map(String::as_str),
+            Some("mine"),
+            "the launch's own wins"
+        );
+        assert_eq!(env.get("ELY").map(String::as_str), Some("ok"));
+    }
+}
 
 #[cfg(test)]
 mod scrollback {
