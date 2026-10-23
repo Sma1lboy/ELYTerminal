@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(not(windows))]
 use crate::term::notify::Progress;
 
 fn encoded(text: &[u8]) -> String {
@@ -266,6 +267,8 @@ fn the_sequence_counts_from_osc_through_st() {
     assert!(read(b"state=done", 4096).is_some());
 }
 
+// Windows reads work from 9;4 instead: `progress_tests`.
+#[cfg(not(windows))]
 #[test]
 fn osc_9_4_maps_to_the_root_record_until_a_program_reports() {
     let root = |records: &Records| {
@@ -276,10 +279,7 @@ fn osc_9_4_maps_to_the_root_record_until_a_program_reports() {
             .map(|(_, record, _)| (record.state, record.progress))
     };
     let mut records = Records::default();
-    let work = records
-        .progress(Progress::Set(Some(40)))
-        .expect("work begins");
-    records.reveal(work);
+    records.progress(Progress::Set(Some(40)));
     assert_eq!(root(&records), Some((State::Working, Some(40))));
     records.progress(Progress::Pause(Some(5)));
     assert_eq!(root(&records), Some((State::Working, Some(5))));
@@ -288,20 +288,13 @@ fn osc_9_4_maps_to_the_root_record_until_a_program_reports() {
     records.progress(Progress::Error(Some(9)));
     assert_eq!(root(&records), Some((State::Error, None)));
     records.progress(Progress::Remove);
-    assert_eq!(
-        root(&records),
-        Some((State::Idle, None)),
-        "the program rests"
-    );
+    assert_eq!(root(&records), None);
     records.report("a".into(), record(State::Idle, None));
     records.progress(Progress::Set(Some(1)));
     assert_eq!(root(&records), None, "a program reports through OSC 7501");
     records.reset();
     assert!(records.list.is_empty());
-    let work = records
-        .progress(Progress::Set(Some(2)))
-        .expect("work begins");
-    records.reveal(work);
+    records.progress(Progress::Set(Some(2)));
     assert_eq!(
         root(&records),
         Some((State::Working, Some(2))),

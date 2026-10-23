@@ -209,8 +209,8 @@ pub struct Records {
 impl Records {
     /// A program's report: replaces the record at `id` whole.
     pub fn report(&mut self, id: String, record: Record) {
-        // The first report replaces what OSC 9;4 mapped.
-        if !self.reported {
+        // The first report replaces what OSC 9;4's reading on Windows made.
+        if progress::INFERS && !self.reported {
             self.list.retain(|(id, ..)| !id.is_empty());
             self.pending = None;
         }
@@ -280,7 +280,7 @@ impl Records {
     /// The user typed: done and error records are seen and go, but herdr's, which herdr marks seen; true when any went.
     pub fn seen(&mut self) -> bool {
         // OSC 9;4's program is still there: its finish, once seen, rests.
-        let rests = self.mapped(State::Done);
+        let rests = progress::INFERS && self.mapped(State::Done);
         let before = self.list.len();
         self.list.retain(|(id, record, _)| {
             id.starts_with(HERDR) || !matches!(record.state, State::Done | State::Error)
@@ -355,5 +355,5 @@ pub use progress::GRACE;
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 mod progress_tests;

@@ -9,6 +9,9 @@ use crate::term::notify::Progress;
 /// How long OSC 9;4's work must last before its row shows it: a slash command's blink of work shows nothing.
 pub const GRACE: Duration = Duration::from_millis(400);
 
+/// Only Windows reads work from OSC 9;4: elsewhere Claude Code's 7501 works, and 9;4 stands as the spec maps it.
+pub const INFERS: bool = cfg!(windows);
+
 impl Records {
     /// OSC 9;4 as the root record, until a program reports through OSC 7501; the number of work that began, which `reveal` shows once `GRACE` runs out.
     pub fn progress(&mut self, progress: Progress) -> Option<u64> {
@@ -24,6 +27,18 @@ impl Records {
             title: None,
             msg: None,
         };
+        if !INFERS {
+            match progress {
+                Progress::Remove => self.list.retain(|(id, ..)| !id.is_empty()),
+                // Paused work is work still, its progress kept.
+                Progress::Set(value) | Progress::Pause(value) => {
+                    self.put(String::new(), root(State::Working, value))
+                }
+                Progress::Indeterminate => self.put(String::new(), root(State::Working, None)),
+                Progress::Error(_) => self.put(String::new(), root(State::Error, None)),
+            }
+            return None;
+        }
         let working =
             self.pending.is_some() || self.mapped(State::Working) || self.mapped(State::Blocked);
         let mut began = None;
@@ -91,6 +106,9 @@ impl Records {
 
     /// A notification during OSC 9;4's work: the program waits on the user, as Claude Code's do.
     pub fn wait(&mut self) {
+        if !INFERS {
+            return;
+        }
         if let Some((work, _)) = self.pending {
             self.reveal(work);
         }
@@ -102,7 +120,7 @@ impl Records {
 
     /// A key reached the program: work that waited on the user goes on.
     pub fn answer(&mut self) -> bool {
-        let waited = self.mapped(State::Blocked);
+        let waited = INFERS && self.mapped(State::Blocked);
         if waited {
             log::info!("status: a key answers the wait, OSC 9;4's work goes on");
             self.set_root(State::Working);
@@ -114,7 +132,7 @@ impl Records {
     pub fn interrupt(&mut self) {
         let working =
             self.pending.is_some() || self.mapped(State::Working) || self.mapped(State::Blocked);
-        if working && !self.interrupted {
+        if INFERS && working && !self.interrupted {
             log::info!("status: Esc or Ctrl-C breaks off OSC 9;4's work");
             self.interrupted = true;
         }

@@ -188,3 +188,46 @@ fn osc_9_4_work_inside_its_grace_shows_nothing() {
     );
     assert!(!records.reveal(work));
 }
+
+#[test]
+fn osc_9_4_maps_to_the_root_record_on_windows_until_a_program_reports() {
+    let root = |records: &Records| {
+        records
+            .list
+            .iter()
+            .find(|(id, ..)| id.is_empty())
+            .map(|(_, record, _)| (record.state, record.progress))
+    };
+    let mut records = Records::default();
+    let work = records
+        .progress(Progress::Set(Some(40)))
+        .expect("work begins");
+    records.reveal(work);
+    assert_eq!(root(&records), Some((State::Working, Some(40))));
+    records.progress(Progress::Pause(Some(5)));
+    assert_eq!(root(&records), Some((State::Working, Some(5))));
+    records.progress(Progress::Indeterminate);
+    assert_eq!(root(&records), Some((State::Working, None)));
+    records.progress(Progress::Error(Some(9)));
+    assert_eq!(root(&records), Some((State::Error, None)));
+    records.progress(Progress::Remove);
+    assert_eq!(
+        root(&records),
+        Some((State::Idle, None)),
+        "the program rests"
+    );
+    records.report("a".into(), record(State::Idle));
+    records.progress(Progress::Set(Some(1)));
+    assert_eq!(root(&records), None, "a program reports through OSC 7501");
+    records.reset();
+    assert!(records.list.is_empty());
+    let work = records
+        .progress(Progress::Set(Some(2)))
+        .expect("work begins");
+    records.reveal(work);
+    assert_eq!(
+        root(&records),
+        Some((State::Working, Some(2))),
+        "a full reset maps again"
+    );
+}
