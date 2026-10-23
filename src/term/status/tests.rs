@@ -435,3 +435,52 @@ fn osc_9_4_work_that_ends_is_done_unless_broken_off() {
         "OSC 7501 leads, 9;4 passes by"
     );
 }
+
+#[test]
+fn a_notification_during_osc_9_4_work_waits_until_a_key_answers() {
+    let root = |records: &Records| {
+        records
+            .list
+            .iter()
+            .find(|(id, ..)| id.is_empty())
+            .map(|(_, record, _)| record.state)
+    };
+    let mut records = Records::default();
+    records.wait();
+    assert_eq!(root(&records), None, "no work, no wait");
+    records.progress(Progress::Indeterminate);
+    records.wait();
+    assert_eq!(
+        root(&records),
+        Some(State::Blocked),
+        "the program waits on the user"
+    );
+    records.progress(Progress::Indeterminate);
+    assert_eq!(
+        root(&records),
+        Some(State::Blocked),
+        "progress keeps the wait"
+    );
+    assert!(records.answer(), "a key answers it");
+    assert_eq!(root(&records), Some(State::Working));
+    assert!(
+        !records.answer(),
+        "work that waits on nothing has nothing to answer"
+    );
+    records.progress(Progress::Remove);
+    assert_eq!(root(&records), Some(State::Done), "answered work ends done");
+    records.progress(Progress::Indeterminate);
+    records.wait();
+    records.interrupt();
+    records.answer();
+    records.progress(Progress::Remove);
+    assert_eq!(root(&records), None, "Esc on the wait breaks the work off");
+    records.progress(Progress::Indeterminate);
+    records.wait();
+    records.progress(Progress::Remove);
+    assert_eq!(
+        root(&records),
+        Some(State::Done),
+        "a wait that ends on its own ends done"
+    );
+}

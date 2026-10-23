@@ -225,13 +225,16 @@ impl Records {
             title: None,
             msg: None,
         };
-        let working = self.mapped_work();
+        let working = self.mapped(State::Working) || self.mapped(State::Blocked);
         match progress {
             // Work that ends is done, as Claude Code's turns end, unless the user broke it off.
             Progress::Remove if working && !self.interrupted => {
                 self.put(String::new(), root(State::Done, None))
             }
             Progress::Remove => self.list.retain(|(id, ..)| !id.is_empty()),
+            // Work that waits on the user keeps waiting until a key answers it.
+            Progress::Set(_) | Progress::Pause(_) | Progress::Indeterminate
+                if self.mapped(State::Blocked) => {}
             // Paused work is work still, its progress kept.
             Progress::Set(value) | Progress::Pause(value) => {
                 self.put(String::new(), root(State::Working, value))
@@ -244,21 +247,52 @@ impl Records {
         }
     }
 
+    /// A notification during OSC 9;4's work: the program waits on the user, as Claude Code's do.
+    pub fn wait(&mut self) {
+        if self.mapped(State::Working) {
+            log::info!("status: a notification during OSC 9;4's work waits on the user");
+            self.set_root(State::Blocked);
+        }
+    }
+
+    /// A key reached the program: work that waited on the user goes on.
+    pub fn answer(&mut self) -> bool {
+        let waited = self.mapped(State::Blocked);
+        if waited {
+            log::info!("status: a key answers the wait, OSC 9;4's work goes on");
+            self.set_root(State::Working);
+        }
+        waited
+    }
+
     /// Esc or Ctrl-C reached the program: the work OSC 9;4 shows ends broken off, not done.
     pub fn interrupt(&mut self) {
-        if self.mapped_work() && !self.interrupted {
+        let working = self.mapped(State::Working) || self.mapped(State::Blocked);
+        if working && !self.interrupted {
             log::info!("status: Esc or Ctrl-C breaks off OSC 9;4's work");
             self.interrupted = true;
         }
     }
 
-    /// The root record is work OSC 9;4 maps.
-    fn mapped_work(&self) -> bool {
+    /// The root record is OSC 9;4's mapping, in `state`.
+    fn mapped(&self, state: State) -> bool {
         !self.reported
             && self
                 .list
                 .iter()
-                .any(|(id, record, _)| id.is_empty() && record.state == State::Working)
+                .any(|(id, record, _)| id.is_empty() && record.state == state)
+    }
+
+    fn set_root(&mut self, state: State) {
+        let record = Record {
+            state,
+            kind: None,
+            progress: None,
+            app: None,
+            title: None,
+            msg: None,
+        };
+        self.put(String::new(), record);
     }
 
     /// herdr's agents in place of the last ones; true when they differ.

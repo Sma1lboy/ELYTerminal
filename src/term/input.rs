@@ -77,7 +77,8 @@ impl TerminalView {
         }
         drop(term);
         self.pty.write(bytes);
-        if self.records.seen() {
+        let seen = self.records.seen();
+        if self.records.answer() || seen {
             self.restate(cx);
         }
         cx.notify();

@@ -130,7 +130,10 @@ impl TerminalView {
                 log::debug!("pty {}: notifications alive: {alive:?}", self.pty.pid);
                 self.reply(notify::alive(&id, &alive));
             }
-            Ask::Show(notice) => self.post(said(&notice), Some(&notice), cx),
+            Ask::Show(notice) => {
+                self.records.wait();
+                self.post(said(&notice), Some(&notice), cx)
+            }
             Ask::Close(id) => self.close(&id, cx),
         }
     }
