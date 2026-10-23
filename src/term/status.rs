@@ -63,6 +63,9 @@ pub(super) const HERDR: &str = "herdr:";
 /// Records a terminal keeps; past them, the one updated longest ago goes.
 pub const RECORDS: usize = 256;
 
+/// How long OSC 9;4's work must last before its row shows it: a slash command's blink of work shows nothing.
+pub const GRACE: std::time::Duration = std::time::Duration::from_millis(400);
+
 /// Standard base64, its padding optional.
 pub(super) const BASE64: GeneralPurpose = GeneralPurpose::new(
     &STANDARD,
@@ -202,6 +205,10 @@ pub struct Records {
     shows: Option<State>,
     /// Esc or Ctrl-C was pressed during OSC 9;4's work, so its end is no finish.
     interrupted: bool,
+    /// OSC 9;4's work that began less than `GRACE` ago, by its number: shown once the grace runs out.
+    pending: Option<(u64, Record)>,
+    /// Numbers OSC 9;4's work, so a late reveal finds no other.
+    works: u64,
 }
 
 impl Records {
@@ -210,16 +217,17 @@ impl Records {
         // The first report replaces what OSC 9;4 mapped.
         if !self.reported {
             self.list.retain(|(id, ..)| !id.is_empty());
+            self.pending = None;
         }
         self.reported = true;
         self.put(id, record);
     }
 
-    /// OSC 9;4 as the root record, until a program reports through OSC 7501.
-    pub fn progress(&mut self, progress: Progress) {
+    /// OSC 9;4 as the root record, until a program reports through OSC 7501; the number of work that began, which `reveal` shows once `GRACE` runs out.
+    pub fn progress(&mut self, progress: Progress) -> Option<u64> {
         if self.reported {
             log::debug!("status: OSC 9;4 passed by, a program reports through OSC 7501");
-            return;
+            return None;
         }
         let root = |state, progress| Record {
             state,
@@ -229,8 +237,14 @@ impl Records {
             title: None,
             msg: None,
         };
-        let working = self.mapped(State::Working) || self.mapped(State::Blocked);
+        let working =
+            self.pending.is_some() || self.mapped(State::Working) || self.mapped(State::Blocked);
+        let mut began = None;
         match progress {
+            // Work that ended inside its grace showed nothing, and leaves nothing.
+            Progress::Remove if self.pending.take().is_some() => {
+                log::debug!("status: OSC 9;4's work ended inside its grace");
+            }
             // Work that ends is done, as Claude Code's turns end, unless the user broke it off.
             Progress::Remove if working && !self.interrupted => {
                 self.put(String::new(), root(State::Done, None))
@@ -241,19 +255,58 @@ impl Records {
             Progress::Set(_) | Progress::Pause(_) | Progress::Indeterminate
                 if self.mapped(State::Blocked) => {}
             // Paused work is work still, its progress kept.
-            Progress::Set(value) | Progress::Pause(value) => {
-                self.put(String::new(), root(State::Working, value))
+            Progress::Set(_) | Progress::Pause(_) | Progress::Indeterminate if !working => {
+                let value = if let Progress::Set(value) | Progress::Pause(value) = progress {
+                    value
+                } else {
+                    None
+                };
+                self.works += 1;
+                self.pending = Some((self.works, root(State::Working, value)));
+                began = Some(self.works);
             }
-            Progress::Indeterminate => self.put(String::new(), root(State::Working, None)),
-            Progress::Error(_) => self.put(String::new(), root(State::Error, None)),
+            Progress::Set(value) | Progress::Pause(value) => {
+                self.go_on(root(State::Working, value))
+            }
+            Progress::Indeterminate => self.go_on(root(State::Working, None)),
+            Progress::Error(_) => {
+                self.pending = None;
+                self.put(String::new(), root(State::Error, None))
+            }
         }
         if !working || matches!(progress, Progress::Remove | Progress::Error(_)) {
             self.interrupted = false;
+        }
+        began
+    }
+
+    /// Work still in its grace takes the new progress there; shown work takes it at once.
+    fn go_on(&mut self, record: Record) {
+        match &mut self.pending {
+            Some((_, pending)) => *pending = record,
+            None => self.put(String::new(), record),
+        }
+    }
+
+    /// The grace of OSC 9;4's work number `work` ran out: its row shows it, if it still works.
+    pub fn reveal(&mut self, work: u64) -> bool {
+        match self.pending.take() {
+            Some((number, record)) if number == work => {
+                self.put(String::new(), record);
+                true
+            }
+            other => {
+                self.pending = other;
+                false
+            }
         }
     }
 
     /// A notification during OSC 9;4's work: the program waits on the user, as Claude Code's do.
     pub fn wait(&mut self) {
+        if let Some((work, _)) = self.pending {
+            self.reveal(work);
+        }
         if self.mapped(State::Working) {
             log::info!("status: a notification during OSC 9;4's work waits on the user");
             self.set_root(State::Blocked);
@@ -272,7 +325,8 @@ impl Records {
 
     /// Esc or Ctrl-C reached the program: the work OSC 9;4 shows ends broken off, not done.
     pub fn interrupt(&mut self) {
-        let working = self.mapped(State::Working) || self.mapped(State::Blocked);
+        let working =
+            self.pending.is_some() || self.mapped(State::Working) || self.mapped(State::Blocked);
         if working && !self.interrupted {
             log::info!("status: Esc or Ctrl-C breaks off OSC 9;4's work");
             self.interrupted = true;
@@ -319,6 +373,7 @@ impl Records {
     /// A full reset: every record goes, and OSC 9;4 maps again.
     pub fn reset(&mut self) {
         self.list.clear();
+        self.pending = None;
         self.reported = false;
     }
 
@@ -353,6 +408,7 @@ impl Records {
 
     /// A new prompt: working, blocked and idle records go, done and error stay.
     pub fn prompt(&mut self) {
+        self.pending = None;
         self.list
             .retain(|(_, record, _)| matches!(record.state, State::Done | State::Error));
     }

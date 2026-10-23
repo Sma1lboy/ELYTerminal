@@ -276,7 +276,10 @@ fn osc_9_4_maps_to_the_root_record_until_a_program_reports() {
             .map(|(_, record, _)| (record.state, record.progress))
     };
     let mut records = Records::default();
-    records.progress(Progress::Set(Some(40)));
+    let work = records
+        .progress(Progress::Set(Some(40)))
+        .expect("work begins");
+    records.reveal(work);
     assert_eq!(root(&records), Some((State::Working, Some(40))));
     records.progress(Progress::Pause(Some(5)));
     assert_eq!(root(&records), Some((State::Working, Some(5))));
@@ -295,7 +298,10 @@ fn osc_9_4_maps_to_the_root_record_until_a_program_reports() {
     assert_eq!(root(&records), None, "a program reports through OSC 7501");
     records.reset();
     assert!(records.list.is_empty());
-    records.progress(Progress::Set(Some(2)));
+    let work = records
+        .progress(Progress::Set(Some(2)))
+        .expect("work begins");
+    records.reveal(work);
     assert_eq!(
         root(&records),
         Some((State::Working, Some(2))),

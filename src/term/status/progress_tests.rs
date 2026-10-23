@@ -14,6 +14,13 @@ fn record(state: State) -> Record {
     }
 }
 
+/// `progress` as the view hands it on, its work outlasting the grace.
+fn progress(records: &mut Records, progress: Progress) {
+    if let Some(work) = records.progress(progress) {
+        records.reveal(work);
+    }
+}
+
 #[test]
 fn osc_9_4_work_that_ends_is_done_unless_broken_off() {
     let root = |records: &Records| {
@@ -24,29 +31,29 @@ fn osc_9_4_work_that_ends_is_done_unless_broken_off() {
             .map(|(_, record, _)| record.state)
     };
     let mut records = Records::default();
-    records.progress(Progress::Indeterminate);
-    records.progress(Progress::Remove);
+    progress(&mut records, Progress::Indeterminate);
+    progress(&mut records, Progress::Remove);
     assert_eq!(root(&records), Some(State::Done), "work that ends is done");
     assert!(records.seen(), "typing sees it");
     assert_eq!(root(&records), Some(State::Idle), "a seen finish rests");
-    records.progress(Progress::Indeterminate);
+    progress(&mut records, Progress::Indeterminate);
     records.interrupt();
-    records.progress(Progress::Remove);
+    progress(&mut records, Progress::Remove);
     assert_eq!(
         root(&records),
         Some(State::Idle),
         "Esc or Ctrl-C broke it off"
     );
-    records.progress(Progress::Set(Some(10)));
-    records.progress(Progress::Remove);
+    progress(&mut records, Progress::Set(Some(10)));
+    progress(&mut records, Progress::Remove);
     assert_eq!(
         root(&records),
         Some(State::Done),
         "the next work starts clean"
     );
     records.interrupt();
-    records.progress(Progress::Indeterminate);
-    records.progress(Progress::Remove);
+    progress(&mut records, Progress::Indeterminate);
+    progress(&mut records, Progress::Remove);
     assert_eq!(
         root(&records),
         Some(State::Done),
@@ -54,7 +61,7 @@ fn osc_9_4_work_that_ends_is_done_unless_broken_off() {
     );
     records.report("a".into(), record(State::Idle));
     assert_eq!(root(&records), None, "a report replaces what 9;4 mapped");
-    records.progress(Progress::Indeterminate);
+    progress(&mut records, Progress::Indeterminate);
     assert_eq!(root(&records), None, "OSC 7501 leads, 9;4 passes by");
 }
 
@@ -70,14 +77,14 @@ fn a_notification_during_osc_9_4_work_waits_until_a_key_answers() {
     let mut records = Records::default();
     records.wait();
     assert_eq!(root(&records), None, "no work, no wait");
-    records.progress(Progress::Indeterminate);
+    progress(&mut records, Progress::Indeterminate);
     records.wait();
     assert_eq!(
         root(&records),
         Some(State::Blocked),
         "the program waits on the user"
     );
-    records.progress(Progress::Indeterminate);
+    progress(&mut records, Progress::Indeterminate);
     assert_eq!(
         root(&records),
         Some(State::Blocked),
@@ -89,21 +96,21 @@ fn a_notification_during_osc_9_4_work_waits_until_a_key_answers() {
         !records.answer(),
         "work that waits on nothing has nothing to answer"
     );
-    records.progress(Progress::Remove);
+    progress(&mut records, Progress::Remove);
     assert_eq!(root(&records), Some(State::Done), "answered work ends done");
-    records.progress(Progress::Indeterminate);
+    progress(&mut records, Progress::Indeterminate);
     records.wait();
     records.interrupt();
     records.answer();
-    records.progress(Progress::Remove);
+    progress(&mut records, Progress::Remove);
     assert_eq!(
         root(&records),
         Some(State::Idle),
         "Esc on the wait breaks the work off"
     );
-    records.progress(Progress::Indeterminate);
+    progress(&mut records, Progress::Indeterminate);
     records.wait();
-    records.progress(Progress::Remove);
+    progress(&mut records, Progress::Remove);
     assert_eq!(
         root(&records),
         Some(State::Done),
@@ -121,7 +128,7 @@ fn osc_9_4_s_program_rests_idle_until_the_shell_s_next_prompt() {
             .map(|(_, record, _)| record.state)
     };
     let mut records = Records::default();
-    records.progress(Progress::Remove);
+    progress(&mut records, Progress::Remove);
     assert_eq!(
         root(&records),
         Some(State::Idle),
@@ -129,4 +136,55 @@ fn osc_9_4_s_program_rests_idle_until_the_shell_s_next_prompt() {
     );
     records.prompt();
     assert_eq!(root(&records), None, "the shell's prompt means it left");
+}
+
+#[test]
+fn osc_9_4_work_inside_its_grace_shows_nothing() {
+    let root = |records: &Records| {
+        records
+            .list
+            .iter()
+            .find(|(id, ..)| id.is_empty())
+            .map(|(_, record, _)| record.state)
+    };
+    let mut records = Records::default();
+    progress(&mut records, Progress::Remove);
+    let work = records
+        .progress(Progress::Indeterminate)
+        .expect("work begins");
+    assert_eq!(
+        root(&records),
+        Some(State::Idle),
+        "the row waits out the grace"
+    );
+    records.progress(Progress::Remove);
+    assert_eq!(
+        root(&records),
+        Some(State::Idle),
+        "a blink of work leaves no finish"
+    );
+    assert!(!records.reveal(work), "its late reveal finds nothing");
+    let first = records
+        .progress(Progress::Indeterminate)
+        .expect("work begins");
+    records.progress(Progress::Remove);
+    let second = records
+        .progress(Progress::Set(Some(5)))
+        .expect("work begins");
+    assert!(!records.reveal(first), "an old reveal shows no newer work");
+    assert!(records.reveal(second));
+    assert_eq!(root(&records), Some(State::Working));
+    let work = {
+        records.progress(Progress::Remove);
+        records
+            .progress(Progress::Indeterminate)
+            .expect("work begins")
+    };
+    records.wait();
+    assert_eq!(
+        root(&records),
+        Some(State::Blocked),
+        "a wait shows its work at once"
+    );
+    assert!(!records.reveal(work));
 }

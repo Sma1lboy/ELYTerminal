@@ -123,7 +123,11 @@ impl TerminalView {
     /// Maps progress, answers the query and alive in order, and posts and closes notifications.
     pub(super) fn ask(&mut self, ask: Ask, cx: &mut Context<Self>) {
         match ask {
-            Ask::Progress(progress) => self.records.progress(progress),
+            Ask::Progress(progress) => {
+                if let Some(work) = self.records.progress(progress) {
+                    self.show_after_grace(work, cx);
+                }
+            }
             Ask::Query(id) => self.reply(notify::answer(&id)),
             Ask::Alive(id) => {
                 let alive = self.notices.alive();
@@ -238,6 +242,20 @@ impl TerminalView {
             ),
             None => {}
         }
+    }
+
+    /// Shows OSC 9;4's work number `work` once its grace runs out, if it still works then.
+    fn show_after_grace(&mut self, work: u64, cx: &mut Context<Self>) {
+        cx.spawn(async move |view, cx| {
+            cx.background_executor().timer(status::GRACE).await;
+            view.update(cx, |view, cx| {
+                if view.records.reveal(work) {
+                    view.restate(cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Takes `posted` back once `ms` run out, though its session be gone, unless a later post holds its tag.
