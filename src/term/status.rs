@@ -207,6 +207,10 @@ pub struct Records {
 impl Records {
     /// A program's report: replaces the record at `id` whole.
     pub fn report(&mut self, id: String, record: Record) {
+        // The first report replaces what OSC 9;4 mapped.
+        if !self.reported {
+            self.list.retain(|(id, ..)| !id.is_empty());
+        }
         self.reported = true;
         self.put(id, record);
     }
@@ -231,7 +235,8 @@ impl Records {
             Progress::Remove if working && !self.interrupted => {
                 self.put(String::new(), root(State::Done, None))
             }
-            Progress::Remove => self.list.retain(|(id, ..)| !id.is_empty()),
+            // A program that ends no work, or whose work was broken off, rests until the shell's next prompt.
+            Progress::Remove => self.put(String::new(), root(State::Idle, None)),
             // Work that waits on the user keeps waiting until a key answers it.
             Progress::Set(_) | Progress::Pause(_) | Progress::Indeterminate
                 if self.mapped(State::Blocked) => {}
@@ -354,11 +359,17 @@ impl Records {
 
     /// The user typed: done and error records are seen and go, but herdr's, which herdr marks seen; true when any went.
     pub fn seen(&mut self) -> bool {
+        // OSC 9;4's program is still there: its finish, once seen, rests.
+        let rests = self.mapped(State::Done);
         let before = self.list.len();
         self.list.retain(|(id, record, _)| {
             id.starts_with(HERDR) || !matches!(record.state, State::Done | State::Error)
         });
-        self.list.len() != before
+        let changed = self.list.len() != before;
+        if rests {
+            self.set_root(State::Idle);
+        }
+        changed
     }
 
     /// The record a row shows, with its id: blocked, else error, working, done or idle, the one reported last in its state.
@@ -419,3 +430,6 @@ impl Records {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod progress_tests;
