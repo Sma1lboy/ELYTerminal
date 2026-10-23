@@ -188,3 +188,40 @@ fn osc_9_4_work_inside_its_grace_shows_nothing() {
     );
     assert!(!records.reveal(work));
 }
+
+#[test]
+fn a_still_title_during_osc_9_4_work_waits_once_its_grace_runs_out() {
+    let root = |records: &Records| {
+        records
+            .list
+            .iter()
+            .find(|(id, ..)| id.is_empty())
+            .map(|(_, record, _)| record.state)
+    };
+    let mut records = Records::default();
+    assert_eq!(records.titled(true), None, "no work, nothing to check");
+    progress(&mut records, Progress::Indeterminate);
+    assert_eq!(records.titled(false), None, "a spinning title works");
+    let work = records
+        .titled(true)
+        .expect("a still title is checked later");
+    assert_eq!(root(&records), Some(State::Working), "not at once");
+    assert!(
+        records.stall(work),
+        "still after the grace: it waits on the user"
+    );
+    assert_eq!(root(&records), Some(State::Blocked));
+    records.titled(false);
+    assert_eq!(
+        root(&records),
+        Some(State::Working),
+        "a spinning title goes on"
+    );
+    let work = records.titled(true).expect("checked later");
+    progress(&mut records, Progress::Remove);
+    assert!(
+        !records.stall(work),
+        "work that ended under a still title is done"
+    );
+    assert_eq!(root(&records), Some(State::Done));
+}
