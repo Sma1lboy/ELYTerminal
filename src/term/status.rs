@@ -204,8 +204,6 @@ pub struct Records {
     pending: Option<(u64, Record)>,
     /// Numbers OSC 9;4's work, so a late reveal finds no other.
     works: u64,
-    /// The program's title stands still, as Claude Code's does while it waits on the user.
-    still: bool,
 }
 
 impl Records {

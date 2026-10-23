@@ -100,28 +100,6 @@ impl Records {
         }
     }
 
-    /// The program's title went still or moved again: the number of work to check once `GRACE` runs out.
-    pub fn titled(&mut self, still: bool) -> Option<u64> {
-        self.still = still;
-        if !still && self.mapped(State::Blocked) {
-            log::info!("status: the title moves again, OSC 9;4's work goes on");
-            self.set_root(State::Working);
-        }
-        (still && (self.pending.is_some() || self.mapped(State::Working))).then_some(self.works)
-    }
-
-    /// Work number `work` still works under a still title once `GRACE` ran out: it waits on the user.
-    pub fn stall(&mut self, work: u64) -> bool {
-        let waits = self.still && self.works == work && self.mapped(State::Working);
-        if waits {
-            log::info!(
-                "status: the title stands still during OSC 9;4's work, which waits on the user"
-            );
-            self.set_root(State::Blocked);
-        }
-        waits
-    }
-
     /// A key reached the program: work that waited on the user goes on.
     pub fn answer(&mut self) -> bool {
         let waited = self.mapped(State::Blocked);

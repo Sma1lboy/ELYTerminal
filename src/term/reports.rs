@@ -258,23 +258,6 @@ impl TerminalView {
         .detach();
     }
 
-    /// Claude Code's title stands still on U+2733 while it waits on the user, and spins while it works.
-    pub(super) fn titled(&mut self, title: &str, cx: &mut Context<Self>) {
-        if let Some(work) = self.records.titled(title.starts_with('\u{2733}')) {
-            cx.spawn(async move |view, cx| {
-                cx.background_executor().timer(status::GRACE).await;
-                view.update(cx, |view, cx| {
-                    if view.records.stall(work) {
-                        view.restate(cx);
-                    }
-                })
-                .ok();
-            })
-            .detach();
-        }
-        self.restate(cx);
-    }
-
     /// Takes `posted` back once `ms` run out, though its session be gone, unless a later post holds its tag.
     fn expire(&mut self, posted: Posted, ms: u32, cx: &mut Context<Self>) {
         let (tag, count) = (posted.tag, posted.count);

@@ -294,7 +294,6 @@ impl TerminalView {
                 }
                 PtyEvent::Title(title) => {
                     self.title.clone_from(&title);
-                    self.titled(&title, cx);
                     cx.emit(TerminalEvent::Title(title));
                 }
                 PtyEvent::Reset => {
